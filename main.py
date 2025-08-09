@@ -232,6 +232,7 @@ def reset_game():
     boss_spawned = False
     cats_spawned = 0
     total_cats = 20  # 총 20마리의 고양이 생성
+    reset_game.snack_spawned = False  # 간식 스폰 플래그 초기화
 
 
 # 게임 상태 변수
@@ -290,13 +291,15 @@ while running:
                 all_sprites.add(cat)
                 cats_spawned += 1
 
-        # 간식 스폰 로직
-        snack_spawn_timer += dt
-        if snack_spawn_timer > config.SNACK_SPAWN_INTERVAL:
-            snack_spawn_timer = 0
-            snack = Snack(config.WIDTH + 30, config.HEIGHT - 80)
-            items.add(snack)
-            all_sprites.add(snack)
+        # 간식 스폰 로직 (한 번만)
+        if not hasattr(reset_game, 'snack_spawned') or not reset_game.snack_spawned:
+            snack_spawn_timer += dt
+            if snack_spawn_timer > config.SNACK_SPAWN_INTERVAL:
+                snack_spawn_timer = 0
+                snack = Snack(config.WIDTH + 30, config.HEIGHT - 80)
+                items.add(snack)
+                all_sprites.add(snack)
+                reset_game.snack_spawned = True
 
         # 모든 고양이를 처치했을 때 보스 스폰
         if cats_spawned >= total_cats and not boss_spawned and len(enemies) == 0:
@@ -347,7 +350,33 @@ while running:
             remaining_cats = total_cats - cats_spawned + len([e for e in enemies if not isinstance(e, BossCat)])
             draw_text(f"남은 고양이: {remaining_cats}마리", 10, 40, config.WHITE)
         else:
-            draw_text("보스 고양이 출현!", 10, 40, config.RED, font_large)
+            # 보스 체력 표시
+            boss = None
+            for enemy in enemies:
+                if isinstance(enemy, BossCat):
+                    boss = enemy
+                    break
+            
+            if boss:
+                draw_text("보스 고양이 출현!", 10, 40, config.RED, font_large)
+                # 보스 체력 바 표시
+                health_bar_width = 200
+                health_bar_height = 20
+                health_ratio = boss.hp / config.BOSS_CAT_HP
+                health_bar_x = 10
+                health_bar_y = 80
+                
+                # 배경 체력 바
+                pygame.draw.rect(screen, (100, 100, 100), (health_bar_x, health_bar_y, health_bar_width, health_bar_height))
+                # 현재 체력 바
+                current_health_width = int(health_bar_width * health_ratio)
+                health_color = (255, 0, 0) if health_ratio > 0.5 else (255, 255, 0) if health_ratio > 0.2 else (255, 0, 0)
+                pygame.draw.rect(screen, health_color, (health_bar_x, health_bar_y, current_health_width, health_bar_height))
+                # 체력 바 테두리
+                pygame.draw.rect(screen, config.WHITE, (health_bar_x, health_bar_y, health_bar_width, health_bar_height), 2)
+                
+                # 체력 수치 표시
+                draw_text(f"보스 체력: {boss.hp}/{config.BOSS_CAT_HP}", 10, 110, config.WHITE)
 
         pygame.display.flip()
     
