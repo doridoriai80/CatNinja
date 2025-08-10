@@ -98,21 +98,48 @@ class Shuriken(pygame.sprite.Sprite):
             self.kill()
 
 class EnemyCat(pygame.sprite.Sprite):
-    COLOR_HP = {
-        "yellow": (config.YELLOW, config.ENEMY_CAT_HP["yellow"]),
-        "black": (config.BLACK, config.ENEMY_CAT_HP["black"]),
-        "white": (config.WHITE, config.ENEMY_CAT_HP["white"]),
-    }
-    def __init__(self, x, y, color_name):
+    def __init__(self, x, y, color_name, stage=1):
         super().__init__()
         self.color_name = color_name
-        self.color, self.hp = EnemyCat.COLOR_HP[color_name]
-        self.width = config.ENEMY_CAT_WIDTH
-        self.height = config.ENEMY_CAT_HEIGHT
-        self.image = pygame.Surface((self.width, self.height))
-        self.image.fill(self.color)
+        self.color = self.get_color(color_name)
+        self.hp = self.get_hp(color_name, stage)
+        
+    def get_color(self, color_name):
+        """색상 이름에 따른 색상 반환"""
+        colors = {
+            "yellow": config.YELLOW,
+            "black": config.BLACK,
+            "white": config.WHITE,
+        }
+        return colors.get(color_name, config.WHITE)
+    
+    def get_hp(self, color_name, stage):
+        """스테이지에 따른 HP 계산 (2배씩 증가)"""
+        base_hp = config.BASE_CAT_HP[color_name]
+        return base_hp * (2 ** (stage - 1))
+    
+    def __init__(self, x, y, color_name, stage=1):
+        super().__init__()
+        self.color_name = color_name
+        self.color = self.get_color(color_name)
+        self.hp = self.get_hp(color_name, stage)
+        self.width, self.height = config.ENEMY_CAT_SIZE[color_name]
+        
+        # 고양이 이미지 로드 및 좌우 반전
+        try:
+            image_path = f"assets/cat_{color_name}.png"
+            self.original_image = pygame.image.load(image_path).convert_alpha()
+            # 이미지 크기 조정
+            self.original_image = pygame.transform.scale(self.original_image, (self.width, self.height))
+            # 좌우 반전 (왼쪽으로 이동하므로 반전 필요)
+            self.image = pygame.transform.flip(self.original_image, True, False)
+        except:
+            # 이미지 로드 실패 시 기존 색상 사각형 사용
+            self.image = pygame.Surface((self.width, self.height))
+            self.image.fill(self.color)
+        
         self.rect = self.image.get_rect(midbottom=(x, y))
-        self.speed = config.ENEMY_CAT_SPEED
+        self.speed = config.ENEMY_CAT_SPEED[color_name]
 
     def update(self, keys=None):
         self.rect.x -= self.speed
@@ -120,21 +147,37 @@ class EnemyCat(pygame.sprite.Sprite):
             self.kill()
 
 class BossCat(pygame.sprite.Sprite):
-    def __init__(self, x, y):
+    def __init__(self, x, y, stage=1):
         super().__init__()
         self.width = config.BOSS_CAT_WIDTH
         self.height = config.BOSS_CAT_HEIGHT
-        self.image = pygame.Surface((self.width, self.height))
-        self.image.fill((150, 0, 150))
+        
+        # 보스 고양이 이미지 로드 및 좌우 반전
+        try:
+            self.original_image = pygame.image.load("assets/cat_boss.png").convert_alpha()
+            # 이미지 크기 조정
+            self.original_image = pygame.transform.scale(self.original_image, (self.width, self.height))
+            # 좌우 반전 (왼쪽으로 이동하므로 반전 필요)
+            self.image = pygame.transform.flip(self.original_image, True, False)
+        except:
+            # 이미지 로드 실패 시 기존 색상 사각형 사용
+            self.image = pygame.Surface((self.width, self.height))
+            self.image.fill((150, 0, 150))
+        
         self.rect = self.image.get_rect(midbottom=(x, y))
-        self.hp = config.BOSS_CAT_HP
+        self.hp = self.get_hp(stage)
         self.stone_cooldown = config.BOSS_STONE_COOLDOWN
         self.last_stone_time = pygame.time.get_ticks()
+        
+    def get_hp(self, stage):
+        """스테이지에 따른 HP 계산 (2배씩 증가)"""
+        return config.BASE_BOSS_HP * (2 ** (stage - 1))
 
     def update(self, keys=None):
         now = pygame.time.get_ticks()
         if now - self.last_stone_time > self.stone_cooldown:
             self.last_stone_time = now
+            # 앞쪽(왼쪽)으로 돌 던지기
             stone = Stone(self.rect.centerx, self.rect.bottom)
             stones.add(stone)
             all_sprites.add(stone)
@@ -143,8 +186,17 @@ class Snack(pygame.sprite.Sprite):
     def __init__(self, x, y):
         super().__init__()
         self.size = config.SNACK_SIZE
-        self.image = pygame.Surface((self.size, self.size))
-        self.image.fill(config.GREEN)
+        
+        # 간식 이미지 로드
+        try:
+            self.original_image = pygame.image.load("assets/snack.png").convert_alpha()
+            # 이미지 크기 조정
+            self.image = pygame.transform.scale(self.original_image, (self.size, self.size))
+        except:
+            # 이미지 로드 실패 시 기존 색상 사각형 사용
+            self.image = pygame.Surface((self.size, self.size))
+            self.image.fill(config.GREEN)
+        
         self.rect = self.image.get_rect(center=(x, y))
 
     def update(self, keys=None):
@@ -159,15 +211,19 @@ class Stone(pygame.sprite.Sprite):
         self.image = pygame.Surface((self.radius*2, self.radius*2), pygame.SRCALPHA)
         pygame.draw.circle(self.image, config.GRAY, (self.radius, self.radius), self.radius)
         self.rect = self.image.get_rect(center=(x, y))
-        self.vel_x = config.STONE_VEL_X
-        self.vel_y = config.STONE_VEL_Y
+        
+        # 왼쪽으로만 던지기 (랜덤 속도)
+        random_speed = random.randint(config.STONE_SPEED_MIN, config.STONE_SPEED_MAX)
+        self.vel_x = -random_speed  # 왼쪽으로 이동 (랜덤 속도)
+        self.vel_y = 0  # 수평으로만 발사 (위아래 움직임 없음)
+        
         self.gravity = config.STONE_GRAVITY
 
     def update(self, keys=None):
         self.vel_y += self.gravity
         self.rect.x += self.vel_x
         self.rect.y += self.vel_y
-        if self.rect.top > config.HEIGHT:
+        if self.rect.top > config.HEIGHT or self.rect.left < 0 or self.rect.right > config.WIDTH:
             self.kill()
 
 
@@ -196,12 +252,31 @@ def draw_centered_text(text, y, color=config.WHITE, font_type=font):
     x = (config.WIDTH - img.get_width()) // 2
     screen.blit(img, (x, y))
 
+def draw_clouds():
+    """배경에 구름을 그리는 함수"""
+    cloud_color = (255, 255, 255)  # 흰색 구름
+    
+    # 구름 1 (왼쪽 위)
+    pygame.draw.ellipse(screen, cloud_color, (50, 80, 120, 60))
+    pygame.draw.ellipse(screen, cloud_color, (80, 70, 80, 50))
+    pygame.draw.ellipse(screen, cloud_color, (110, 90, 60, 40))
+    
+    # 구름 2 (오른쪽 위)
+    pygame.draw.ellipse(screen, cloud_color, (600, 60, 100, 50))
+    pygame.draw.ellipse(screen, cloud_color, (630, 50, 70, 40))
+    pygame.draw.ellipse(screen, cloud_color, (660, 70, 50, 30))
+    
+    # 구름 3 (중앙 위)
+    pygame.draw.ellipse(screen, cloud_color, (350, 100, 90, 45))
+    pygame.draw.ellipse(screen, cloud_color, (380, 90, 60, 35))
+    pygame.draw.ellipse(screen, cloud_color, (410, 105, 40, 25))
+
 def draw_menu():
     screen.fill(config.BACKGROUND_COLOR)
     pygame.draw.rect(screen, config.GROUND_COLOR, (0, config.HEIGHT-50, config.WIDTH, 50))
     
     # 게임 제목
-    draw_centered_text("강아지 닌자 횡스크롤", 100, config.BLUE, font_large)
+    draw_centered_text("개 닌자 횡스크롤", 100, config.BLUE, font_large)
     
     # 조작법
     draw_text("조작법:", 50, 200, config.WHITE, font)
@@ -216,9 +291,10 @@ def draw_menu():
     pygame.display.flip()
 
 def reset_game():
-    global game_over, game_clear, spawn_timer, snack_spawn_timer, boss_spawned, cats_spawned, total_cats
+    global game_over, game_clear, spawn_timer, snack_spawn_timer, boss_spawned, cats_spawned, total_cats, current_stage
     game_over = False
     game_clear = False
+    current_stage = 1  # 스테이지 1부터 시작
     player.alive = True
     player.rect.bottomleft = (50, config.HEIGHT - 50)
     player.shuriken_double = False
@@ -231,14 +307,15 @@ def reset_game():
     snack_spawn_timer = 0
     boss_spawned = False
     cats_spawned = 0
-    total_cats = 20  # 총 20마리의 고양이 생성
+    total_cats = config.TOTAL_CATS_TO_SPAWN  # config에서 설정된 고양이 수만큼 생성
     reset_game.snack_spawned = False  # 간식 스폰 플래그 초기화
 
 
 # 게임 상태 변수
 game_state = "menu"  # "menu", "playing", "game_over", "game_clear"
+current_stage = 1  # 현재 스테이지
 cats_spawned = 0
-total_cats = 20
+total_cats = config.TOTAL_CATS_TO_SPAWN
 
 running = True
 while running:
@@ -286,7 +363,7 @@ while running:
             if spawn_timer > config.ENEMY_SPAWN_INTERVAL:
                 spawn_timer = 0
                 cat_type = random.choice(["yellow", "black", "white"])
-                cat = EnemyCat(config.WIDTH + 50, config.HEIGHT - 50, cat_type)
+                cat = EnemyCat(config.WIDTH + 50, config.HEIGHT - 50, cat_type, current_stage)
                 enemies.add(cat)
                 all_sprites.add(cat)
                 cats_spawned += 1
@@ -303,19 +380,38 @@ while running:
 
         # 모든 고양이를 처치했을 때 보스 스폰
         if cats_spawned >= total_cats and not boss_spawned and len(enemies) == 0:
-            boss = BossCat(config.WIDTH - 150, config.HEIGHT - 50)
+            boss = BossCat(config.WIDTH - 150, config.HEIGHT - 50, current_stage)
             enemies.add(boss)
             all_sprites.add(boss)
             boss_spawned = True
 
         for shuriken in shurikens:
-            hit_cats = pygame.sprite.spritecollide(shuriken, enemies, False)
+            if len(enemies) > 0:
+                hit_cats = pygame.sprite.spritecollide(shuriken, enemies, False)
+            else:
+                hit_cats = []
             for cat in hit_cats:
                 if isinstance(cat, BossCat):
                     cat.hp -= 1
                     if cat.hp <= 0:
                         cat.kill()
-                        game_state = "game_clear"
+                        # 다음 스테이지로 진행
+                        if current_stage < config.MAX_STAGE:
+                            current_stage += 1
+                            # 다음 스테이지 준비
+                            cats_spawned = 0
+                            boss_spawned = False
+                            spawn_timer = 0
+                            snack_spawn_timer = 0
+                            reset_game.snack_spawned = False
+                            # 모든 스프라이트 제거 (플레이어 제외)
+                            for group in [enemies, shurikens, items, stones]:
+                                group.empty()
+                            all_sprites.empty()
+                            all_sprites.add(player)
+                        else:
+                            # 모든 스테이지 클리어
+                            game_state = "game_clear"
                     shuriken.kill()
                 else:
                     cat.hp -= 1
@@ -323,32 +419,39 @@ while running:
                         cat.kill()
                     shuriken.kill()
 
-        if pygame.sprite.spritecollide(player, enemies, False):
+        if len(enemies) > 0 and pygame.sprite.spritecollide(player, enemies, False):
             player.alive = False
             game_state = "game_over"
 
-        hit_snack = pygame.sprite.spritecollide(player, items, True)
+        if len(items) > 0:
+            hit_snack = pygame.sprite.spritecollide(player, items, True)
+        else:
+            hit_snack = []
         if hit_snack:
             player.eat_snack()
 
-        if pygame.sprite.spritecollide(player, stones, False):
+        if len(stones) > 0 and pygame.sprite.spritecollide(player, stones, False):
             player.alive = False
             game_state = "game_over"
 
         # 게임 화면 그리기
         screen.fill(config.BACKGROUND_COLOR)
+        draw_clouds()  # 구름 그리기
         pygame.draw.rect(screen, config.GROUND_COLOR, (0, config.HEIGHT-50, config.WIDTH, 50))
         all_sprites.draw(screen)
 
         # UI 정보 표시
+        # 현재 스테이지 표시
+        draw_text(f"스테이지 {current_stage}", 10, 10, config.WHITE, font_large)
+        
         if player.shuriken_double:
             time_left = (player.double_end_time - pygame.time.get_ticks()) // 1000
-            draw_text(f"간식 효과: {time_left}초", 10, 10, config.GREEN)
+            draw_text(f"간식 효과: {time_left}초", 10, 70, config.GREEN)
         
         # 남은 고양이 수 표시
         if not boss_spawned:
             remaining_cats = total_cats - cats_spawned + len([e for e in enemies if not isinstance(e, BossCat)])
-            draw_text(f"남은 고양이: {remaining_cats}마리", 10, 40, config.WHITE)
+            draw_text(f"남은 고양이: {remaining_cats}마리", 10, 50, config.WHITE)
         else:
             # 보스 체력 표시
             boss = None
@@ -362,7 +465,7 @@ while running:
                 # 보스 체력 바 표시
                 health_bar_width = 200
                 health_bar_height = 20
-                health_ratio = boss.hp / config.BOSS_CAT_HP
+                health_ratio = boss.hp / (config.BASE_BOSS_HP * (2 ** (current_stage - 1)))
                 health_bar_x = 10
                 health_bar_y = 80
                 
@@ -376,12 +479,14 @@ while running:
                 pygame.draw.rect(screen, config.WHITE, (health_bar_x, health_bar_y, health_bar_width, health_bar_height), 2)
                 
                 # 체력 수치 표시
-                draw_text(f"보스 체력: {boss.hp}/{config.BOSS_CAT_HP}", 10, 110, config.WHITE)
+                max_boss_hp = config.BASE_BOSS_HP * (2 ** (current_stage - 1))
+                draw_text(f"보스 체력: {boss.hp}/{max_boss_hp}", 10, 110, config.WHITE)
 
         pygame.display.flip()
     
     elif game_state == "game_over":
         screen.fill(config.BACKGROUND_COLOR)
+        draw_clouds()  # 구름 그리기
         pygame.draw.rect(screen, config.GROUND_COLOR, (0, config.HEIGHT-50, config.WIDTH, 50))
         all_sprites.draw(screen)
         
@@ -399,6 +504,7 @@ while running:
     
     elif game_state == "game_clear":
         screen.fill(config.BACKGROUND_COLOR)
+        draw_clouds()  # 구름 그리기
         pygame.draw.rect(screen, config.GROUND_COLOR, (0, config.HEIGHT-50, config.WIDTH, 50))
         all_sprites.draw(screen)
         
@@ -408,8 +514,12 @@ while running:
         overlay.fill((0, 0, 0))
         screen.blit(overlay, (0, 0))
         
-        draw_centered_text("게임 클리어!", config.HEIGHT//2 - 60, config.BLUE, font_large)
-        draw_centered_text("축하합니다!", config.HEIGHT//2 - 20, config.GREEN, font)
+        if current_stage >= config.MAX_STAGE:
+            draw_centered_text("게임 클리어!", config.HEIGHT//2 - 60, config.BLUE, font_large)
+            draw_centered_text("모든 스테이지 완주!", config.HEIGHT//2 - 20, config.GREEN, font)
+        else:
+            draw_centered_text("스테이지 클리어!", config.HEIGHT//2 - 60, config.BLUE, font_large)
+            draw_centered_text(f"스테이지 {current_stage} 완주!", config.HEIGHT//2 - 20, config.GREEN, font)
         draw_centered_text("R 키: 재시작", config.HEIGHT//2 + 20, config.WHITE, font)
         draw_centered_text("M 키: 메뉴로 돌아가기", config.HEIGHT//2 + 50, config.WHITE, font)
         
