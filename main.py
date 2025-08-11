@@ -243,6 +243,11 @@ spawn_timer = 0
 snack_spawn_timer = 0
 boss_spawned = False
 
+def get_touch_rect(sprite, margin):
+    rect = sprite.rect.copy()
+    rect.inflate_ip(-margin*2, -margin*2)
+    return rect
+
 def draw_text(text, x, y, color=config.WHITE, font_type=font):
     img = font_type.render(text, True, color)
     screen.blit(img, (x, y))
@@ -270,6 +275,20 @@ def draw_clouds():
     pygame.draw.ellipse(screen, cloud_color, (350, 100, 90, 45))
     pygame.draw.ellipse(screen, cloud_color, (380, 90, 60, 35))
     pygame.draw.ellipse(screen, cloud_color, (410, 105, 40, 25))
+
+def draw_background_elements():
+    # 산 그리기 (멀리, 큰 삼각형)
+    mountain_color = (120, 180, 120)
+    pygame.draw.polygon(screen, mountain_color, [(100, config.HEIGHT-50), (300, 200), (500, config.HEIGHT-50)])
+    pygame.draw.polygon(screen, mountain_color, [(400, config.HEIGHT-50), (600, 250), (800, config.HEIGHT-50)])
+    pygame.draw.polygon(screen, (100, 150, 100), [(0, config.HEIGHT-50), (120, 300), (250, config.HEIGHT-50)])
+
+    # 나무 그리기 (여러 개)
+    for x in [150, 250, 600, 700]:
+        # 나무 기둥
+        pygame.draw.rect(screen, (100, 60, 20), (x, config.HEIGHT-120, 20, 70))
+        # 나뭇잎 (원)
+        pygame.draw.ellipse(screen, (30, 120, 30), (x-20, config.HEIGHT-150, 60, 50))
 
 def draw_menu():
     screen.fill(config.BACKGROUND_COLOR)
@@ -419,7 +438,24 @@ while running:
                         cat.kill()
                     shuriken.kill()
 
-        if len(enemies) > 0 and pygame.sprite.spritecollide(player, enemies, False):
+        # 충돌 체크 부분(playing 상태)
+        player_touch_rect = get_touch_rect(player, config.PLAYER_TOUCH_MARGIN)
+        enemy_touched = False
+        for enemy in enemies:
+            if player_touch_rect.colliderect(get_touch_rect(enemy, 0)):
+                enemy_touched = True
+                break
+        if enemy_touched:
+            player.alive = False
+            game_state = "game_over"
+
+        # 돌 충돌도 동일하게
+        stone_touched = False
+        for stone in stones:
+            if player_touch_rect.colliderect(get_touch_rect(stone, 0)):
+                stone_touched = True
+                break
+        if stone_touched:
             player.alive = False
             game_state = "game_over"
 
@@ -430,12 +466,9 @@ while running:
         if hit_snack:
             player.eat_snack()
 
-        if len(stones) > 0 and pygame.sprite.spritecollide(player, stones, False):
-            player.alive = False
-            game_state = "game_over"
-
         # 게임 화면 그리기
         screen.fill(config.BACKGROUND_COLOR)
+        draw_background_elements() # 배경 요소 그리기
         draw_clouds()  # 구름 그리기
         pygame.draw.rect(screen, config.GROUND_COLOR, (0, config.HEIGHT-50, config.WIDTH, 50))
         all_sprites.draw(screen)

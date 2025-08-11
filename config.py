@@ -20,6 +20,9 @@ PLAYER_HEIGHT = 80
 PLAYER_SPEED = 5
 PLAYER_JUMP_VELOCITY = -12
 
+# 플레이어 충돌 판정 마진 (픽셀 단위, 값이 클수록 판정이 느슨해짐)
+PLAYER_TOUCH_MARGIN = 20
+
 SHURIKEN_SPEED = 15
 SHURIKEN_WIDTH = 20
 SHURIKEN_HEIGHT = 10
@@ -28,7 +31,7 @@ SHURIKEN_HEIGHT = 10
 ENEMY_CAT_SIZE = {
     "yellow": (40, 50),  # 노란 고양이: 작음 (빠름)
     "black": (50, 60),   # 검은 고양이: 보통 (보통)
-    "white": (60, 70),   # 흰 고양이: 큼 (느림)
+    "white": (50, 60),   # 흰 고양이: 큼 (느림)
 }
 
 # 고양이 색상별 속도 설정
@@ -59,9 +62,9 @@ TOTAL_CATS_TO_SPAWN = 10  # 발생할 고양이의 총 마리 수
 # 스테이지 설정
 MAX_STAGE = 10  # 최대 스테이지 수
 BASE_CAT_HP = {  # 기본 고양이 HP (스테이지 1 기준)
-    "yellow": 4,
-    "black": 8,
-    "white": 12,
+    "yellow": 2,
+    "black": 3,
+    "white": 4,
 }
 BASE_BOSS_HP = 100  # 기본 보스 HP (스테이지 1 기준)
 
