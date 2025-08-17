@@ -2,6 +2,7 @@ import pygame
 import random
 import config
 import os
+import json
 
 pygame.init()
 
@@ -137,7 +138,7 @@ class Player(pygame.sprite.Sprite):
                 self.rect.right = config.WIDTH  # 오른쪽 경계에 고정
 
         # ===== 점프 처리 =====
-        if keys[pygame.K_SPACE] and self.on_ground:  # 스페이스바 + 지면 접촉 시
+        if keys[pygame.K_UP] and self.on_ground:  # 위쪽 화살표 + 지면 접촉 시
             self.vel_y = config.PLAYER_JUMP_VELOCITY  # 점프 속도 설정 (음수 = 위로)
             self.on_ground = False  # 점프 중이므로 지면에서 떨어짐
 
@@ -422,6 +423,9 @@ class EnemyCat(pygame.sprite.Sprite):
             
             # config.py에 정의된 크기로 이미지 조정
             self.image = pygame.transform.scale(self.original_image, (self.width, self.height))
+            
+            # 고양이가 왼쪽으로 이동하므로 이미지를 좌우 반전
+            self.image = pygame.transform.flip(self.image, True, False)
         except:
             # 이미지 로드 실패 시 색상 사각형으로 대체
             self.image = pygame.Surface((self.width, self.height))
@@ -468,23 +472,19 @@ class EnemyCat(pygame.sprite.Sprite):
             int: 계산된 체력 값
             
         체력 계산 공식:
-        - 기본 체력은 색상별로 다름
+        - 기본 체력은 색상별로 다름 (config.py에서 설정)
         - 스테이지가 올라갈수록 체력이 증가 (난이도 조절)
         """
-        # 기본 체력 (색상별로 다름)
-        base_hp = {
-            "yellow": 1,  # 노란색: 기본 체력 (1)
-            "black": 2,   # 검은색: 높은 체력 (2)
-            "white": 1    # 흰색: 낮은 체력 (1)
-        }
+        # config.py에서 기본 체력 가져오기
+        base_hp = config.ENEMY_CAT_BASE_HP.get(color_name, 1)
         
         # 스테이지가 올라갈수록 체력 증가 (난이도 조절)
-        # stage_multiplier = 1 + (stage - 1) * 0.5
+        # stage_multiplier = 1 + (stage - 1) * config.ENEMY_CAT_STAGE_MULTIPLIER
         # 예: 스테이지 1 = 1.0, 스테이지 2 = 1.5, 스테이지 3 = 2.0
-        stage_multiplier = 1 + (stage - 1) * 0.5
+        stage_multiplier = 1 + (stage - 1) * config.ENEMY_CAT_STAGE_MULTIPLIER
         
         # 기본 체력 × 스테이지 배율로 최종 체력 계산
-        return int(base_hp.get(color_name, 1) * stage_multiplier)
+        return int(base_hp * stage_multiplier)
     
     def update(self, keys=None):
         """
@@ -576,6 +576,9 @@ class BossCat(pygame.sprite.Sprite):
             
             # config.py에 정의된 크기로 이미지 조정
             self.image = pygame.transform.scale(self.original_image, (self.width, self.height))
+            
+            # 보스 고양이도 왼쪽을 향하도록 이미지를 좌우 반전
+            self.image = pygame.transform.flip(self.image, True, False)
         except:
             # 이미지 로드 실패 시 빨간색 사각형으로 대체
             self.image = pygame.Surface((self.width, self.height))
@@ -943,6 +946,66 @@ def draw_centered_text(text, y, color=config.WHITE, font_type=font):
     x = (config.WIDTH - img.get_width()) // 2
     screen.blit(img, (x, y))
 
+def load_highscores():
+    """하이스코어 JSON 파일 로드 (없으면 빈 리스트 반환)"""
+    path = config.HIGHSCORES_FILE
+    try:
+        if not os.path.exists(path):
+            return []
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            if isinstance(data, list):
+                data.sort(key=lambda r: (-int(r.get("score", 0)), float(r.get("time", 0.0))))
+                return data[:10]
+            return []
+    except Exception as e:
+        print(f"⚠️ 하이스코어 로드 실패: {e}")
+        return []
+
+def save_highscores(records):
+    """하이스코어 JSON 저장. 상위 10개만 저장"""
+    try:
+        records = list(records)
+        records.sort(key=lambda r: (-int(r.get("score", 0)), float(r.get("time", 0.0))))
+        with open(config.HIGHSCORES_FILE, "w", encoding="utf-8") as f:
+            json.dump(records[:10], f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"⚠️ 하이스코어 저장 실패: {e}")
+
+def is_highscore(score, elapsed_seconds, records):
+    """현재 기록이 TOP 10에 드는지 여부"""
+    if not records or len(records) < 10:
+        return True
+    records = sorted(records, key=lambda r: (-int(r.get("score", 0)), float(r.get("time", 0.0))))
+    last = records[-1]
+    last_score = int(last.get("score", 0))
+    last_time = float(last.get("time", 0.0))
+    if score > last_score:
+        return True
+    if score == last_score and elapsed_seconds < last_time:
+        return True
+    return False
+
+def is_top10_score(score, elapsed_seconds, records):
+    """현재 점수가 TOP 10에 실제로 들어가는지 여부"""
+    if not records or len(records) < 10:
+        return True
+    
+    # 현재 기록들을 점수 내림차순, 시간 오름차순으로 정렬
+    sorted_records = sorted(records, key=lambda r: (-int(r.get("score", 0)), float(r.get("time", 0.0))))
+    
+    # TOP 10의 마지막 기록과 비교
+    last_record = sorted_records[9]  # 10번째 기록 (0부터 시작하므로 인덱스 9)
+    last_score = int(last_record.get("score", 0))
+    last_time = float(last_record.get("time", 0.0))
+    
+    # 점수가 더 높거나, 점수가 같고 시간이 더 빠르면 TOP 10 진입
+    if score > last_score:
+        return True
+    if score == last_score and elapsed_seconds < last_time:
+        return True
+    return False
+
 def draw_clouds():
     """배경에 구름을 그리는 함수"""
     cloud_color = (255, 255, 255)  # 흰색 구름
@@ -983,30 +1046,56 @@ def draw_menu():
     # 게임 제목
     draw_centered_text("개 닌자 대모험", 100, config.BLUE, font_title)
     
-    # 조작법
-    draw_text("조작법:", 50, 200, config.WHITE, font)
-    draw_text("← → : 이동", 70, 230, config.WHITE, font_small)
-    draw_text("스페이스바 : 점프", 70, 250, config.WHITE, font_small)
-    draw_text("Z : 수리검 발사", 70, 270, config.WHITE, font_small)
-    draw_text("R : 게임 재시작", 70, 290, config.WHITE, font_small)
+    # 하이스코어 TOP 10 (가운데)
+    highs = load_highscores()
+    y0 = 200
+    draw_centered_text("TOP 10 하이스코어", y0, config.YELLOW, font)
+    y = y0 + 30
+    if highs:
+        for idx, rec in enumerate(highs, start=1):
+            name = str(rec.get("name", "???"))[:config.PLAYER_NAME_MAX_LENGTH]
+            score_val = int(rec.get("score", 0))
+            t = float(rec.get("time", 0))
+            draw_centered_text(f"{idx}. {name} - {score_val}점 ({int(t)}초)", y, config.WHITE, font_small)
+            y += 22
+    else:
+        draw_centered_text("기록 없음", y, config.GRAY, font_small)
+        y += 22
+
+    # 조작법 (하단)
+    y += 20
+    draw_centered_text("조작법:", y, config.WHITE, font)
+    y += 30
+    draw_centered_text("← → : 이동", y, config.WHITE, font_small)
+    y += 22
+    draw_centered_text("↑ : 점프", y, config.WHITE, font_small)
+    y += 22
+    draw_centered_text("스페이스바 : 수리검 발사", y, config.WHITE, font_small)
+    y += 22
+    draw_centered_text("R : 게임 재시작", y, config.WHITE, font_small)
     
     # 게임 시작 안내
-    draw_centered_text("스페이스바를 눌러 게임 시작", 350, config.GREEN, font)
+    y += 30
+    draw_centered_text("스페이스바를 눌러 게임 시작", y, config.GREEN, font)
     
     pygame.display.flip()
 
 def reset_game():
-    global game_over, game_clear, spawn_timer, snack_spawn_timer, puppy_spawn_timer, boss_spawned, cats_spawned, total_cats, current_stage, stage_start_time
+    global game_over, game_clear, spawn_timer, snack_spawn_timer, puppy_spawn_timer, boss_spawned, cats_spawned, total_cats, current_stage, stage_start_time, score, game_start_ticks, stage_clear_start_time, stage_clear_jump_index
     game_over = False
     game_clear = False
     current_stage = 1  # 스테이지 1부터 시작
     stage_start_time = pygame.time.get_ticks()  # 스테이지 시작 시간 기록
+    game_start_ticks = pygame.time.get_ticks()  # 게임 시작 시간 기록
     player.alive = True
     player.rect.bottomleft = (50, config.HEIGHT - 50)
     player.shuriken_double = False
     player.double_end_time = 0
     player.defense_count = 0  # 방어 횟수 초기화
     player.defense_active = False  # 방어 효과 초기화
+    score = 0  # 점수 초기화
+    stage_clear_start_time = 0  # 스테이지 클리어 시작 시간 초기화
+    stage_clear_jump_index = -1  # 스테이지 클리어 점프 인덱스 초기화
     
     # 스프라이트 그룹 초기화
     for group in [enemies, shurikens, items, puppies, stones]:
@@ -1028,11 +1117,17 @@ def reset_game():
 
 
 # 게임 상태 변수
-game_state = "menu"  # "menu", "playing", "game_over", "game_clear"
+game_state = "menu"  # "menu", "playing", "name_entry", "stage_clear", "game_over", "game_clear"
 current_stage = 1  # 현재 스테이지
 cats_spawned = 0
 total_cats = config.TOTAL_CATS_TO_SPAWN
 stage_start_time = 0  # 스테이지 시작 시간
+game_start_ticks = 0  # 게임 시작 시간
+score = 0  # 누적 점수
+entered_name = ""  # 이름 입력 버퍼
+stage_clear_start_time = 0  # 스테이지 클리어 시작 시간
+stage_clear_jump_index = -1  # 스테이지 클리어 중 몇 번째 점프를 했는지 추적 (-1부터 시작)
+highscores_cache = load_highscores()
 
 running = True
 while running:
@@ -1051,7 +1146,7 @@ while running:
                     reset_game()
             
             elif game_state == "playing":
-                if event.key == pygame.K_z and player.alive:
+                if event.key == pygame.K_SPACE and player.alive:
                     if player.shuriken_double:
                         sh1 = Shuriken(player.rect.right, player.rect.centery - 10)
                         sh2 = Shuriken(player.rect.right, player.rect.centery + 10)
@@ -1061,9 +1156,24 @@ while running:
                         sh = Shuriken(player.rect.right, player.rect.centery)
                         shurikens.add(sh)
                         all_sprites.add(sh)
+            elif game_state == "name_entry":
+                if event.key == pygame.K_RETURN:
+                    name = entered_name.strip() or "PLAYER"
+                    elapsed = (pygame.time.get_ticks() - game_start_ticks) / 1000.0
+                    highscores_cache.append({"name": name[:config.PLAYER_NAME_MAX_LENGTH], "score": score, "time": round(elapsed, 2)})
+                    save_highscores(highscores_cache)
+                    highscores_cache = load_highscores()
+                    game_state = "game_over"
+                elif event.key == pygame.K_BACKSPACE:
+                    entered_name = entered_name[:-1]
+                else:
+                    ch = event.unicode
+                    if ch and ch.isprintable() and ch != "\x00":
+                        if len(entered_name) < config.PLAYER_NAME_MAX_LENGTH:
+                            entered_name += ch
             
             elif game_state in ["game_over", "game_clear"]:
-                if event.key == pygame.K_r:
+                if event.key == pygame.K_SPACE:
                     print(f"🎮 게임 재시작 - game_state: {game_state} -> playing")
                     game_state = "playing"
                     reset_game()
@@ -1145,23 +1255,22 @@ while running:
                     cat.hp -= 1
                     if cat.hp <= 0:
                         cat.kill()
-                        # 다음 스테이지로 진행
+                        score += config.SCORE_BOSS
+                        # 다음 스테이지로 진행 (커스텀 스테이지 클리어 연출)
                         if current_stage < config.MAX_STAGE:
-                            current_stage += 1
-                            stage_start_time = pygame.time.get_ticks()  # 새 스테이지 시작 시간 기록
-                            # 다음 스테이지 준비
-                            cats_spawned = 0
-                            boss_spawned = False
-                            spawn_timer = 0
-                            snack_spawn_timer = 0
-                            puppy_spawn_timer = 0  # puppy 타이머 초기화
-                            reset_game.next_puppy_interval = random.randint(config.PUPPY_SPAWN_MIN_INTERVAL, config.PUPPY_SPAWN_MAX_INTERVAL)  # 다음 puppy 스폰 간격 초기화
-                            reset_game.snack_spawned = False
-                            # 모든 스프라이트 제거 (플레이어 제외)
-                            for group in [enemies, shurikens, items, puppies, stones]:
-                                group.empty()
-                            all_sprites.empty()
-                            all_sprites.add(player)
+                            game_state = "stage_clear"
+                            stage_clear_start_time = pygame.time.get_ticks()
+                            stage_clear_jump_index = -1
+                            # 플레이어를 화면 중앙으로 이동하고 바닥에 정렬
+                            player.rect.centerx = config.WIDTH // 2
+                            player.rect.bottom = config.HEIGHT - 50
+                            player.vel_y = 0
+                            player.on_ground = True
+                            # 스테이지 클리어 시 표창(수리검), 돌 즉시 제거
+                            for s in list(shurikens):
+                                s.kill()
+                            for st in list(stones):
+                                st.kill()
                         else:
                             # 모든 스테이지 클리어
                             game_state = "game_clear"
@@ -1169,6 +1278,8 @@ while running:
                 else:
                     cat.hp -= 1
                     if cat.hp <= 0:
+                        if hasattr(cat, "color_name"):
+                            score += config.SCORE_PER_CAT.get(cat.color_name, 0)
                         cat.kill()
                     shuriken.kill()
 
@@ -1220,9 +1331,32 @@ while running:
                 if player.has_defense():
                     # puppy가 있으면 방어 효과 적용
                     print(f"🐕 방어 효과 적용! 현재 방어 횟수: {player.defense_count}")
-                    # 충돌한 적 제거
+                    # 충돌한 적 제거 + 점수 반영
                     if touched_enemy:
-                        touched_enemy.kill()
+                        if isinstance(touched_enemy, BossCat):
+                            # 보스 제거 시 점수 및 스테이지 진행
+                            score += config.SCORE_BOSS
+                            touched_enemy.kill()
+                            if current_stage < config.MAX_STAGE:
+                                # 보스와 충돌로 보스를 제거한 경우에도 동일한 스테이지 클리어 연출로 이동
+                                game_state = "stage_clear"
+                                stage_clear_start_time = pygame.time.get_ticks()
+                                stage_clear_jump_index = -1
+                                player.rect.centerx = config.WIDTH // 2
+                                player.rect.bottom = config.HEIGHT - 50
+                                player.vel_y = 0
+                                player.on_ground = True
+                                # 스테이지 클리어 시 표창(수리검), 돌 즉시 제거
+                                for s in list(shurikens):
+                                    s.kill()
+                                for st in list(stones):
+                                    st.kill()
+                            else:
+                                game_state = "game_clear"
+                        else:
+                            if hasattr(touched_enemy, "color_name"):
+                                score += config.SCORE_PER_CAT.get(touched_enemy.color_name, 0)
+                            touched_enemy.kill()
                         print(f"🐕 방어 효과로 적 제거됨")
                     # puppy 방어 효과 1회 소모
                     player.remove_puppy_defense()
@@ -1231,7 +1365,12 @@ while running:
                     # puppy가 없으면 게임 오버
                     print("❌ 방어 효과 없음 - 게임 오버")
                     player.alive = False
-                    game_state = "game_over"
+                    elapsed_seconds = (pygame.time.get_ticks() - game_start_ticks) / 1000.0
+                    if is_top10_score(score, elapsed_seconds, highscores_cache):
+                        entered_name = ""
+                        game_state = "name_entry"
+                    else:
+                        game_state = "game_over"
 
         # 돌 충돌도 동일하게
         stone_touched = False
@@ -1265,7 +1404,12 @@ while running:
                 # puppy가 없으면 게임 오버
                 print("🪨 돌 충돌 방어 효과 없음 - 게임 오버")
                 player.alive = False
-                game_state = "game_over"
+                elapsed_seconds = (pygame.time.get_ticks() - game_start_ticks) / 1000.0
+                if is_top10_score(score, elapsed_seconds, highscores_cache):
+                    entered_name = ""
+                    game_state = "name_entry"
+                else:
+                    game_state = "game_over"
 
         # 게임 화면 그리기
         screen.fill(config.BACKGROUND_COLOR)
@@ -1280,6 +1424,12 @@ while running:
         # UI 정보 표시
         # 현재 스테이지 표시
         draw_text(f"스테이지 {current_stage}", 10, 10, config.WHITE, font_large)
+        # 중앙 상단 점수/시간
+        elapsed_seconds = (pygame.time.get_ticks() - game_start_ticks) // 1000
+        info_text = f"점수: {score} | 시간: {int(elapsed_seconds)}초"
+        info_img = font_small.render(info_text, True, config.WHITE)
+        info_x = (config.WIDTH - info_img.get_width()) // 2
+        screen.blit(info_img, (info_x, 10))
         
         # 스테이지 시작 메시지 표시 (3초간)
         if pygame.time.get_ticks() - stage_start_time < 3000:
@@ -1288,21 +1438,21 @@ while running:
         
         if player.shuriken_double:
             time_left = (player.double_end_time - pygame.time.get_ticks()) // 1000
-            draw_text(f"간식 효과: {time_left}초", 10, 70, config.GREEN)
+            # draw_text(f"간식 효과: {time_left}초", 10, 70, config.BLUE)
         
         # 방어 횟수 표시
-        if player.defense_count > 0:
-            draw_text(f"방어 효과: 활성화 ({player.defense_count}회)", 10, 100, config.YELLOW)
-        else:
-            draw_text("방어 효과: 비활성화", 10, 100, config.GRAY)
+        # if player.defense_count > 0:
+        #     draw_text(f"방어 효과: 활성화 ({player.defense_count}회)", 10, 100, config.YELLOW)
+        # else:
+        #     draw_text("방어 효과: 비활성화", 10, 100, config.GRAY)
         
         # 남은 고양이 수 표시
         if not boss_spawned:
             remaining_cats = total_cats - cats_spawned + len([e for e in enemies if not isinstance(e, BossCat)])
-            draw_text(f"남은 고양이: {remaining_cats}마리", 10, 50, config.WHITE)
+            # draw_text(f"남은 고양이: {remaining_cats}마리", 10, 50, config.WHITE)
             # 디버깅 정보 추가
-            draw_text(f"스폰된 고양이: {cats_spawned}/{total_cats}", 10, 130, config.WHITE, font_small)
-            draw_text(f"현재 enemies: {len(enemies)}", 10, 150, config.WHITE, font_small)
+            # draw_text(f"스폰된 고양이: {cats_spawned}/{total_cats}", 10, 130, config.WHITE, font_small)
+            # draw_text(f"현재 enemies: {len(enemies)}", 10, 150, config.WHITE, font_small)
         else:
             # 보스 체력 표시
             boss = None
@@ -1338,50 +1488,163 @@ while running:
         pygame.display.flip()
     
     elif game_state == "game_over":
+        # 게임 진행 중의 배경과 스프라이트들을 먼저 그리기
         screen.fill(config.BACKGROUND_COLOR)
         draw_clouds()  # 구름 그리기
+        draw_background_elements()  # 산과 나무 그리기
         pygame.draw.rect(screen, config.GROUND_COLOR, (0, config.HEIGHT-50, config.WIDTH, 50))
+        
+        # 모든 스프라이트 그리기 (고양이, 보스, 돌, 간식, puppy 등)
         all_sprites.draw(screen)
         
         # 플레이어와 함께 puppy 표시
         player.draw_puppy(screen)
         
-        # 반투명 오버레이
+        # 반투명 오버레이 (게임 오버 텍스트를 위한 배경)
         overlay = pygame.Surface((config.WIDTH, config.HEIGHT))
         overlay.set_alpha(128)
         overlay.fill((0, 0, 0))
         screen.blit(overlay, (0, 0))
         
-        draw_centered_text("게임 오버!", config.HEIGHT//2 - 60, config.RED, font_large)
-        draw_centered_text("R 키: 재시작", config.HEIGHT//2 - 20, config.WHITE, font)
-        draw_centered_text("M 키: 메뉴로 돌아가기", config.HEIGHT//2 + 10, config.WHITE, font)
+        # 게임 오버 텍스트들
+        draw_centered_text("게임 오버!", config.HEIGHT//2 - 120, config.RED, font_large)
+        total_elapsed = (pygame.time.get_ticks() - game_start_ticks) // 1000
+        draw_centered_text(f"최종 점수: {score}점 | 시간: {int(total_elapsed)}초", config.HEIGHT//2 - 80, config.YELLOW, font)
+
+        # TOP 10 표시
+        highs = load_highscores()
+        draw_centered_text("TOP 10", config.HEIGHT//2 - 40, config.GREEN, font)
+        y = config.HEIGHT//2 - 10
+        if highs:
+            for idx, rec in enumerate(highs, start=1):
+                name = str(rec.get("name", "???"))[:config.PLAYER_NAME_MAX_LENGTH]
+                s_val = int(rec.get("score", 0))
+                t_val = int(float(rec.get("time", 0)))
+                draw_centered_text(f"{idx}. {name} - {s_val}점 ({t_val}초)", y, config.WHITE, font_small)
+                y += 20
+        else:
+            draw_centered_text("기록 없음", y, config.GRAY, font_small)
+            y += 20
+
+        draw_centered_text("스페이스바: 재시작", y + 10, config.WHITE, font)
+        draw_centered_text("M 키: 메뉴로 돌아가기", y + 40, config.WHITE, font)
         
         pygame.display.flip()
     
+    elif game_state == "stage_clear":
+        # 새로운 스테이지 클리어 연출: 플레이어 중앙 정렬 + 점프 3회 + 3초 대기 후 다음 스테이지
+        elapsed_time = pygame.time.get_ticks() - stage_clear_start_time
+
+        # 항상 중앙에 고정하고 바닥에 붙여둠 (수평은 고정, 수직은 점프 시에만 변경)
+        player.rect.centerx = config.WIDTH // 2
+        if player.rect.bottom > config.HEIGHT - 50:
+            player.rect.bottom = config.HEIGHT - 50
+
+        # 3초 동안 3번 점프 (각 1초마다 한번 트리거)
+        # 점프 트리거 타이밍: 0ms, 1000ms, 2000ms 근처에서 한 번만 실행
+        intended_index = min(elapsed_time // 1000, 2)  # 0,1,2 중 하나
+        if intended_index != stage_clear_jump_index and intended_index <= 2:
+            stage_clear_jump_index = intended_index
+            player.vel_y = config.PLAYER_JUMP_VELOCITY
+            player.on_ground = False
+
+        # 중력 적용 및 착지 처리
+        player.vel_y += config.GRAVITY
+        player.rect.y += player.vel_y
+        if player.rect.bottom >= config.HEIGHT - 50:
+            player.rect.bottom = config.HEIGHT - 50
+            player.vel_y = 0
+            player.on_ground = True
+
+        # 3초 경과 시 다음 스테이지로 전환
+        if elapsed_time >= 3000:
+            current_stage += 1
+            stage_start_time = pygame.time.get_ticks()
+            # 다음 스테이지 준비
+            cats_spawned = 0
+            boss_spawned = False
+            spawn_timer = 0
+            snack_spawn_timer = 0
+            puppy_spawn_timer = 0
+            reset_game.next_puppy_interval = random.randint(config.PUPPY_SPAWN_MIN_INTERVAL, config.PUPPY_SPAWN_MAX_INTERVAL)
+            reset_game.snack_spawned = False
+            for group in [enemies, shurikens, items, puppies, stones]:
+                group.empty()
+            all_sprites.empty()
+            all_sprites.add(player)
+            game_state = "playing"
+
+        # 화면 그리기
+        screen.fill(config.BACKGROUND_COLOR)
+        draw_background_elements()
+        draw_clouds()
+        pygame.draw.rect(screen, config.GROUND_COLOR, (0, config.HEIGHT-50, config.WIDTH, 50))
+        all_sprites.draw(screen)
+        player.draw_puppy(screen)
+
+        # 상단 중앙 VICTORY 배너
+        draw_centered_text("VICTORY", 20, config.YELLOW, font_large)
+
+        # 간단 메시지 및 남은 시간
+        draw_centered_text(f"스테이지 {current_stage} 클리어!", config.HEIGHT//2 - 80, config.YELLOW, font_large)
+        draw_centered_text("다음 스테이지 준비 중...", config.HEIGHT//2 - 40, config.GREEN, font)
+        remaining_time = max(0, 3 - (elapsed_time // 1000))
+        draw_centered_text(f"{remaining_time}초 후 다음 스테이지", config.HEIGHT//2, config.WHITE, font)
+
+        pygame.display.flip()
+    
     elif game_state == "game_clear":
+        # 게임 진행 중의 배경과 스프라이트들을 먼저 그리기
         screen.fill(config.BACKGROUND_COLOR)
         draw_clouds()  # 구름 그리기
+        draw_background_elements()  # 산과 나무 그리기
         pygame.draw.rect(screen, config.GROUND_COLOR, (0, config.HEIGHT-50, config.WIDTH, 50))
+        
+        # 모든 스프라이트 그리기 (고양이, 보스, 돌, 간식, puppy 등)
         all_sprites.draw(screen)
         
         # 플레이어와 함께 puppy 표시
         player.draw_puppy(screen)
         
-        # 반투명 오버레이
+        # 반투명 오버레이 (게임 클리어 텍스트를 위한 배경)
         overlay = pygame.Surface((config.WIDTH, config.HEIGHT))
         overlay.set_alpha(128)
         overlay.fill((0, 0, 0))
         screen.blit(overlay, (0, 0))
         
+        # 게임 클리어 텍스트들
         if current_stage >= config.MAX_STAGE:
             draw_centered_text("게임 클리어!", config.HEIGHT//2 - 60, config.BLUE, font_large)
             draw_centered_text("모든 스테이지 완주!", config.HEIGHT//2 - 20, config.GREEN, font)
         else:
             draw_centered_text("스테이지 클리어!", config.HEIGHT//2 - 60, config.BLUE, font_large)
             draw_centered_text(f"스테이지 {current_stage} 완주!", config.HEIGHT//2 - 20, config.GREEN, font)
-        draw_centered_text("R 키: 재시작", config.HEIGHT//2 + 20, config.WHITE, font)
+        draw_centered_text("스페이스바: 재시작", config.HEIGHT//2 + 20, config.WHITE, font)
         draw_centered_text("M 키: 메뉴로 돌아가기", config.HEIGHT//2 + 50, config.WHITE, font)
         
+        pygame.display.flip()
+
+    elif game_state == "name_entry":
+        # 이름 입력 화면
+        screen.fill(config.BACKGROUND_COLOR)
+        draw_clouds()
+        draw_background_elements()
+        pygame.draw.rect(screen, config.GROUND_COLOR, (0, config.HEIGHT-50, config.WIDTH, 50))
+
+        overlay = pygame.Surface((config.WIDTH, config.HEIGHT))
+        overlay.set_alpha(160)
+        overlay.fill((0, 0, 0))
+        screen.blit(overlay, (0, 0))
+
+        draw_centered_text("신기록! 이름을 입력하세요", config.HEIGHT//2 - 80, config.YELLOW, font_large)
+        draw_centered_text(f"최종 점수: {score}점", config.HEIGHT//2 - 40, config.WHITE, font)
+        elapsed_disp = (pygame.time.get_ticks() - game_start_ticks) // 1000
+        draw_centered_text(f"시간: {int(elapsed_disp)}초", config.HEIGHT//2 - 10, config.WHITE, font)
+
+        name_display = entered_name if (pygame.time.get_ticks() // 500) % 2 == 0 else entered_name + "_"
+        draw_centered_text(f"이름: {name_display}", config.HEIGHT//2 + 30, config.GREEN, font)
+        draw_centered_text("Enter: 저장, Backspace: 지우기", config.HEIGHT//2 + 70, config.GRAY, font_small)
+
         pygame.display.flip()
 
 pygame.quit()
