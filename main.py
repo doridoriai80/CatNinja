@@ -5,11 +5,21 @@ import os
 import json
 
 pygame.init()
+pygame.mixer.init()  # 오디오 시스템 초기화
 
 screen = pygame.display.set_mode((config.WIDTH, config.HEIGHT))
 pygame.display.set_caption("강아지 닌자 횡스크롤")
 
 clock = pygame.time.Clock()
+
+# 배경음악 로드 및 재생
+try:
+    pygame.mixer.music.load("assets/catninja.mp3")
+    pygame.mixer.music.set_volume(0.5)  # 볼륨을 50%로 설정
+    pygame.mixer.music.play(-1)  # -1은 무한 반복을 의미
+    print("🎵 배경음악 로드 및 재생 성공")
+except Exception as e:
+    print(f"⚠️ 배경음악 로드 실패: {e}")
 
 # 한글 폰트 설정
 try:
@@ -89,8 +99,8 @@ class Player(pygame.sprite.Sprite):
         
         # 플레이어의 초기 위치 설정
         # bottomleft는 사각형의 왼쪽 하단 모서리를 의미합니다
-        # (50, config.HEIGHT - 50)은 화면 왼쪽 하단에서 약간 떨어진 위치입니다
-        self.rect.bottomleft = (50, config.HEIGHT - 50)
+        # config.py에서 설정된 위치를 사용합니다
+        self.rect.bottomleft = (config.PLAYER_START_X, config.PLAYER_START_Y)
         
         # ===== 물리 속성 초기화 =====
         self.vel_y = 0        # Y축 속도 (점프, 낙하할 때 사용)
@@ -99,12 +109,13 @@ class Player(pygame.sprite.Sprite):
         
         # ===== 게임 상태 변수 초기화 =====
         self.alive = True           # 생존 여부 (True = 살아있음, False = 죽음)
-        self.shuriken_double = False # 더블 수리검 효과 활성화 여부
-        self.double_end_time = 0    # 더블 수리검 효과 종료 시간
         
         # ===== puppy 방어 시스템 변수 =====
         self.defense_count = 0      # 남은 방어 횟수 (0 = 방어 불가, 1 이상 = 방어 가능)
         self.defense_active = False # 방어 효과 활성화 여부
+        
+        # ===== gold shuriken 시스템 변수 =====
+        self.gold_shuriken_count = 0  # 보유한 gold shuriken 갯수
 
     def update(self, keys):
         """
@@ -152,20 +163,17 @@ class Player(pygame.sprite.Sprite):
             self.vel_y = 0                          # 낙하 속도 초기화
             self.on_ground = True                   # 지면 접촉 상태로 변경
 
-        # ===== 더블 수리검 효과 시간 체크 =====
-        if self.shuriken_double and pygame.time.get_ticks() > self.double_end_time:
-            # 효과 시간이 지나면 더블 수리검 효과 비활성화
-            self.shuriken_double = False
+
 
     def eat_snack(self):
         """
-        간식을 먹었을 때 더블 수리검 효과를 활성화합니다.
+        간식을 먹었을 때 gold shuriken을 최대치로 충전합니다.
         
         이 메서드는 간식과 충돌했을 때 자동으로 호출됩니다.
         """
-        self.shuriken_double = True  # 더블 수리검 효과 활성화
-        # 현재 시간 + 지속 시간으로 효과 종료 시간 계산
-        self.double_end_time = pygame.time.get_ticks() + config.SNACK_DURATION
+        # gold shuriken 갯수를 최대치로 충전
+        self.gold_shuriken_count = config.GOLD_SHURIKEN_MAX_COUNT
+        print(f"🍪 간식 획득! Gold Shuriken 최대 충전: {self.gold_shuriken_count}/{config.GOLD_SHURIKEN_MAX_COUNT}")
 
     def get_puppy(self):
         """
@@ -275,6 +283,24 @@ class Player(pygame.sprite.Sprite):
                 # draw_circle(화면, 색상, (x, y), 반지름)으로 원을 그립니다
                 pygame.draw.circle(screen, (255, 200, 100), (puppy_x, puppy_y), config.PUPPY_DISPLAY_SIZE//2)
 
+    def throw_gold_shuriken(self):
+        """
+        gold shuriken을 던집니다.
+        
+        Returns:
+            bool: gold shuriken 발사 성공 여부
+                  True = 발사 성공, False = 발사 실패 (gold shuriken 부족)
+        
+        이 메서드는 플레이어가 gold shuriken을 발사할 때 호출됩니다.
+        """
+        if self.gold_shuriken_count > 0:
+            self.gold_shuriken_count -= 1
+            print(f"🥷 Gold Shuriken 발사! 남은 갯수: {self.gold_shuriken_count}")
+            return True
+        else:
+            print("🥷 Gold Shuriken이 부족합니다!")
+            return False
+
 
 # ============================================================================
 # 🥷 수리검 클래스 (Shuriken Class)
@@ -358,6 +384,95 @@ class Shuriken(pygame.sprite.Sprite):
             self.kill()  # 스프라이트를 제거하고 메모리에서 해제
 
 # ============================================================================
+# 🥷 골드 수리검 클래스 (GoldShuriken Class)
+# ============================================================================
+# 골드 수리검은 플레이어가 발사하는 강력한 무기입니다.
+# snack을 먹으면 획득할 수 있으며, 일반 수리검보다 2배 강력합니다.
+
+class GoldShuriken(pygame.sprite.Sprite):
+    """
+    골드 수리검 클래스
+    
+    주요 기능:
+    - 플레이어가 발사하는 강력한 투척 무기
+    - 오른쪽으로 직선 이동
+    - 적과 충돌 시 2배 데미지
+    - 화면 밖으로 나가면 자동 제거
+    
+    pygame.sprite.Sprite를 상속받아 Pygame의 스프라이트 시스템을 사용합니다.
+    """
+    
+    def __init__(self, x, y):
+        """
+        골드 수리검 초기화 - 골드 수리검 객체가 생성될 때 한 번만 실행됩니다.
+        
+        Args:
+            x: 골드 수리검 시작 X 좌표 (보통 플레이어의 오른쪽 위치)
+            y: 골드 수리검 시작 Y 좌표 (보통 플레이어의 중앙 높이)
+        
+        이 메서드에서:
+        - 골드 수리검의 이미지를 로드하고 크기를 조정합니다
+        - 골드 수리검의 초기 위치를 설정합니다
+        - 골드 수리검의 이동 속도를 설정합니다
+        """
+        super().__init__()  # pygame.sprite.Sprite 초기화 (반드시 필요)
+        
+        # ===== 이미지 로드 및 설정 =====
+        try:
+            # assets/gold_shuriken.png 파일을 로드하여 골드 수리검 이미지로 사용
+            # convert_alpha()는 투명도를 지원하는 이미지 형식으로 변환합니다
+            self.original_image = pygame.image.load("assets/gold_shuriken.png").convert_alpha()
+            
+            # config.py에 정의된 크기로 이미지 조정 (일반 수리검의 2배 크기)
+            # transform.scale(이미지, (너비, 높이))로 크기를 변경합니다
+            gold_width = config.SHURIKEN_WIDTH * config.GOLD_SHURIKEN_SIZE_MULTIPLIER
+            gold_height = config.SHURIKEN_HEIGHT * config.GOLD_SHURIKEN_SIZE_MULTIPLIER
+            self.image = pygame.transform.scale(self.original_image, (gold_width, gold_height))
+        except:
+            # 이미지 로드 실패 시 노란색 사각형으로 대체
+            # Surface(너비, 높이)로 빈 이미지를 만들고 fill(색상)로 채웁니다
+            gold_width = config.SHURIKEN_WIDTH * config.GOLD_SHURIKEN_SIZE_MULTIPLIER
+            gold_height = config.SHURIKEN_HEIGHT * config.GOLD_SHURIKEN_SIZE_MULTIPLIER
+            self.image = pygame.Surface((gold_width, gold_height))
+            self.image.fill(config.YELLOW)  # 노란색 사각형
+            print("⚠️ 골드 수리검 이미지 로드 실패 - 기본 사각형 사용")
+        
+        # ===== 충돌 영역 설정 =====
+        # rect는 골드 수리검의 충돌 영역을 나타냅니다
+        # get_rect(center=(x, y))로 이미지 중심을 기준으로 사각형을 생성합니다
+        self.rect = self.image.get_rect(center=(x, y))
+        
+        # ===== 이동 속도 설정 =====
+        # 골드 수리검 이동 속도 (config.py에서 가져옴)
+        # 양수 값이므로 오른쪽으로 이동합니다
+        self.speed = config.SHURIKEN_SPEED
+        
+        # ===== 데미지 배수 설정 =====
+        # 일반 수리검 대비 데미지 배수 (config.py에서 가져옴)
+        self.damage_multiplier = config.GOLD_SHURIKEN_DAMAGE_MULTIPLIER
+    
+    def update(self, keys=None):
+        """
+        골드 수리검 상태 업데이트 - 매 프레임마다 호출됩니다.
+        
+        Args:
+            keys: 키 입력 (골드 수리검은 자동 이동하므로 사용하지 않음)
+        
+        이 메서드에서:
+        - 골드 수리검을 오른쪽으로 이동시킵니다
+        - 화면 밖으로 나가면 자동으로 제거합니다
+        """
+        # ===== 골드 수리검 이동 =====
+        # 골드 수리검을 오른쪽으로 이동 (X좌표 증가)
+        self.rect.x += self.speed
+        
+        # ===== 화면 경계 체크 =====
+        # 화면 왼쪽 밖으로 나가면 자동 제거 (메모리 절약)
+        # 화면 왼쪽 경계는 0보다 작은 값입니다
+        if self.rect.left > config.WIDTH:
+            self.kill()  # 스프라이트를 제거하고 메모리에서 해제
+
+# ============================================================================
 # 🐱 적 고양이 클래스 (EnemyCat Class)
 # ============================================================================
 # 적 고양이는 플레이어를 공격하는 적입니다.
@@ -368,15 +483,15 @@ class EnemyCat(pygame.sprite.Sprite):
     적 고양이 클래스
     
     고양이 타입별 특성:
-    - 노란색: 기본 고양이 (보통 체력, 보통 속도)
-    - 검은색: 강한 고양이 (높은 체력, 느린 속도)
-    - 흰색: 빠른 고양이 (낮은 체력, 빠른 속도, 점프 능력)
+    - 노란색: 빠른 점프 고양이 (낮은 점프, 빠른 점프 간격, 강한 중력)
+    - 검은색: 높은 점프 고양이 (높은 점프, 느린 점프 간격, 약한 중력)
+    - 흰색: 보통 점프 고양이 (보통 점프, 보통 점프 간격, 보통 중력)
     
     주요 기능:
     - 왼쪽으로 자동 이동
     - 플레이어와 충돌 시 게임오버
     - 수리검에 맞으면 체력 감소
-    - 흰색 고양이는 점프하면서 이동
+    - 모든 고양이가 색상별로 다른 점프 패턴으로 이동
     
     pygame.sprite.Sprite를 상속받아 Pygame의 스프라이트 시스템을 사용합니다.
     """
@@ -408,11 +523,12 @@ class EnemyCat(pygame.sprite.Sprite):
         # 색상별로 다른 크기 설정 (config.py에서 가져옴)
         self.width, self.height = config.ENEMY_CAT_SIZE[color_name]
         
-        # ===== 점프 관련 변수 (흰색 고양이용) =====
+        # ===== 점프 관련 변수 (모든 고양이용) =====
         self.vel_y = 0        # Y축 속도 (점프, 낙하할 때 사용)
         self.on_ground = False # 지면 접촉 여부 (점프 가능 여부 판단용)
         self.jump_timer = 0   # 점프 타이머 (점프 간격 조절용)
-        self.jump_interval = config.WHITE_CAT_JUMP_INTERVAL  # 점프 간격 (config에서 가져옴)
+        # 색상별로 다른 점프 간격 설정
+        self.jump_interval = self.get_jump_interval(color_name)
         
         # ===== 고양이 이미지 로드 및 크기 조정 =====
         try:
@@ -460,6 +576,60 @@ class EnemyCat(pygame.sprite.Sprite):
         # get() 메서드로 색상을 가져오고, 없으면 기본값(흰색) 반환
         return color_map.get(color_name, config.WHITE)
     
+    def get_jump_interval(self, color_name):
+        """
+        색상별 점프 간격을 반환합니다.
+        
+        Args:
+            color_name: 색상 이름 ("yellow", "black", "white")
+            
+        Returns:
+            int: 점프 간격 (밀리초)
+        """
+        jump_interval_map = {
+            "yellow": config.YELLOW_CAT_JUMP_INTERVAL,  # 노란 고양이: 빠른 점프
+            "black": config.BLACK_CAT_JUMP_INTERVAL,    # 검은 고양이: 느린 점프
+            "white": config.WHITE_CAT_JUMP_INTERVAL     # 흰 고양이: 보통 점프
+        }
+        # get() 메서드로 점프 간격을 가져오고, 없으면 기본값(흰 고양이) 반환
+        return jump_interval_map.get(color_name, config.WHITE_CAT_JUMP_INTERVAL)
+    
+    def get_jump_velocity(self, color_name):
+        """
+        색상별 점프 속도를 반환합니다.
+        
+        Args:
+            color_name: 색상 이름 ("yellow", "black", "white")
+            
+        Returns:
+            int: 점프 속도 (음수 = 위로)
+        """
+        jump_velocity_map = {
+            "yellow": config.YELLOW_CAT_JUMP_VELOCITY,  # 노란 고양이: 낮은 점프
+            "black": config.BLACK_CAT_JUMP_VELOCITY,    # 검은 고양이: 높은 점프
+            "white": config.WHITE_CAT_JUMP_VELOCITY     # 흰 고양이: 보통 점프
+        }
+        # get() 메서드로 점프 속도를 가져오고, 없으면 기본값(흰 고양이) 반환
+        return jump_velocity_map.get(color_name, config.WHITE_CAT_JUMP_VELOCITY)
+    
+    def get_gravity(self, color_name):
+        """
+        색상별 중력을 반환합니다.
+        
+        Args:
+            color_name: 색상 이름 ("yellow", "black", "white")
+            
+        Returns:
+            float: 중력 효과
+        """
+        gravity_map = {
+            "yellow": config.YELLOW_CAT_GRAVITY,  # 노란 고양이: 강한 중력
+            "black": config.BLACK_CAT_GRAVITY,    # 검은 고양이: 약한 중력
+            "white": config.WHITE_CAT_GRAVITY     # 흰 고양이: 보통 중력
+        }
+        # get() 메서드로 중력을 가져오고, 없으면 기본값(흰 고양이) 반환
+        return gravity_map.get(color_name, config.WHITE_CAT_GRAVITY)
+    
     def get_hp(self, color_name, stage):
         """
         색상과 스테이지에 따른 체력을 계산합니다.
@@ -498,30 +668,124 @@ class EnemyCat(pygame.sprite.Sprite):
         - 고양이를 왼쪽으로 이동시킵니다
         - 화면 밖으로 나가면 자동으로 제거합니다
         """
-        # ===== 흰색 고양이 점프 로직 =====
-        if self.color_name == "white":  # 흰색 고양이일 때만 점프
-            # 점프 타이머 증가 (약 60FPS 기준으로 16ms씩 증가)
-            self.jump_timer += 16
-            
-            # 점프 간격에 도달하면 점프
-            if self.jump_timer >= self.jump_interval:
-                self.vel_y = config.WHITE_CAT_JUMP_VELOCITY  # 점프 속도 설정 (음수 = 위로)
-                self.jump_timer = 0  # 타이머 리셋
-            
-            # 중력 적용 (점프 후 낙하)
-            self.vel_y += config.WHITE_CAT_GRAVITY
-            
-            # Y축 위치 업데이트
-            self.rect.y += self.vel_y
-            
-            # ===== 지면 처리 =====
-            # 바닥에 닿으면 점프 속도 초기화
-            if self.rect.bottom >= config.HEIGHT - 50:
-                self.rect.bottom = config.HEIGHT - 50  # 바닥에 고정
-                self.vel_y = 0  # 낙하 속도 초기화
+        # ===== 모든 고양이 점프 로직 =====
+        # 점프 타이머 증가 (약 60FPS 기준으로 16ms씩 증가)
+        self.jump_timer += 16
+        
+        # 점프 간격에 도달하면 점프
+        if self.jump_timer >= self.jump_interval:
+            self.vel_y = self.get_jump_velocity(self.color_name)  # 색상별 점프 속도 설정
+            self.jump_timer = 0  # 타이머 리셋
+        
+        # 중력 적용 (점프 후 낙하)
+        self.vel_y += self.get_gravity(self.color_name)
+        
+        # Y축 위치 업데이트
+        self.rect.y += self.vel_y
+        
+        # ===== 지면 처리 =====
+        # 바닥에 닿으면 점프 속도 초기화
+        if self.rect.bottom >= config.HEIGHT - 50:
+            self.rect.bottom = config.HEIGHT - 50  # 바닥에 고정
+            self.vel_y = 0  # 낙하 속도 초기화
         
         # ===== 고양이 이동 =====
         # 고양이를 왼쪽으로 이동 (X좌표 감소)
+        self.rect.x -= self.speed
+        
+        # ===== 화면 경계 체크 =====
+        # 화면 왼쪽 밖으로 나가면 자동 제거 (메모리 절약)
+        if self.rect.right < 0:
+            self.kill()  # 스프라이트를 제거하고 메모리에서 해제
+
+# ============================================================================
+# 🐭 마우스 적 클래스 (MouseEnemy Class)
+# ============================================================================
+# 마우스 적은 왼쪽에서 오른쪽으로 이동하는 작은 적입니다.
+# 랜덤한 속도로 이동하며, 좌우 반전된 이미지로 표시됩니다.
+
+class MouseEnemy(pygame.sprite.Sprite):
+    """
+    마우스 적 클래스
+    
+    주요 기능:
+    - 왼쪽에서 오른쪽으로 자동 이동
+    - 랜덤한 속도로 이동
+    - 좌우 반전된 이미지로 표시
+    - 플레이어와 충돌 시 게임오버
+    - 수리검에 맞으면 체력 감소
+    
+    pygame.sprite.Sprite를 상속받아 Pygame의 스프라이트 시스템을 사용합니다.
+    """
+    
+    def __init__(self, x, y, stage=1):
+        """
+        마우스 적 초기화 - 마우스 객체가 생성될 때 한 번만 실행됩니다.
+        
+        Args:
+            x: 마우스 시작 X 좌표 (보통 화면 왼쪽에서 시작)
+            y: 마우스 시작 Y 좌표 (보통 지면 높이)
+            stage: 현재 스테이지 (체력 계산에 사용, 기본값: 1)
+        
+        이 메서드에서:
+        - 마우스의 크기와 이미지를 설정합니다
+        - 마우스의 체력을 설정합니다 (스테이지에 따라 증가)
+        - 마우스의 이동 속도를 랜덤하게 설정합니다
+        """
+        super().__init__()  # pygame.sprite.Sprite 초기화 (반드시 필요)
+        
+        # ===== 마우스 크기 설정 =====
+        self.width = config.MOUSE_WIDTH   # 마우스 너비 (config.py에서 가져옴)
+        self.height = config.MOUSE_HEIGHT # 마우스 높이 (config.py에서 가져옴)
+        
+        # ===== 마우스 체력 설정 =====
+        # 스테이지에 따라 체력이 증가합니다
+        self.hp = config.MOUSE_BASE_HP + (stage - 1) * config.MOUSE_HP_STAGE_MULTIPLIER
+        
+        # ===== 마우스 이미지 로드 및 크기 조정 =====
+        try:
+            # assets/mouse.png 파일을 로드하여 마우스 이미지로 사용
+            self.original_image = pygame.image.load("assets/mouse.png").convert_alpha()
+            
+            # config.py에 정의된 크기로 이미지 조정
+            self.image = pygame.transform.scale(self.original_image, (self.width, self.height))
+            
+            # 마우스가 왼쪽으로 이동하므로 이미지를 좌우 반전 (오른쪽을 향하게)
+            self.image = pygame.transform.flip(self.image, True, False)
+        except:
+            # 이미지 로드 실패 시 회색 사각형으로 대체
+            self.image = pygame.Surface((self.width, self.height))
+            self.image.fill(config.GRAY)  # 회색 사각형
+            print("⚠️ 마우스 이미지 로드 실패 - 기본 사각형 사용")
+        
+        # ===== 마우스의 충돌 영역 설정 =====
+        # rect는 마우스의 충돌 영역을 나타냅니다
+        # midbottom=(x, y)는 사각형의 하단 중앙을 기준으로 위치를 설정합니다
+        # 마우스는 표창보다 아래에 위치하도록 Y 좌표를 조정
+        self.rect = self.image.get_rect(midbottom=(x, y))
+        
+        # 마우스의 충돌 영역 설정
+        # player와의 충돌을 위해 전체 영역 사용
+        self.collision_rect = self.rect.copy()
+        print(f"🐭 Mouse 생성: rect={self.rect}, collision_rect={self.collision_rect}")
+        
+        # ===== 마우스 이동 속도 설정 =====
+        # 랜덤한 속도로 설정 (config.py에서 정의된 범위 내에서)
+        self.speed = random.randint(config.MOUSE_SPEED_MIN, config.MOUSE_SPEED_MAX)
+    
+    def update(self, keys=None):
+        """
+        마우스 적 업데이트 - 매 프레임마다 실행됩니다.
+        
+        Args:
+            keys: 키 입력 상태 (사용하지 않지만 다른 스프라이트와 호환성을 위해 받음)
+        
+        이 메서드에서:
+        - 마우스를 오른쪽으로 이동시킵니다
+        - 화면 경계를 체크하여 화면 밖으로 나가면 제거합니다
+        """
+        # ===== 마우스 이동 =====
+        # 마우스를 왼쪽으로 이동 (X좌표 감소)
         self.rect.x -= self.speed
         
         # ===== 화면 경계 체크 =====
@@ -542,6 +806,8 @@ class BossCat(pygame.sprite.Sprite):
     주요 기능:
     - 높은 체력과 공격력
     - 주기적으로 돌을 던져서 공격
+    - 랜덤한 간격으로 왼쪽으로 이동
+    - 화면 왼쪽을 벗어나면 처음 위치에서 다시 나타남
     - 수리검에 맞으면 체력 감소
     - 체력이 0이 되면 다음 스테이지로 진행
     - 스테이지가 올라갈수록 체력 증가
@@ -600,8 +866,14 @@ class BossCat(pygame.sprite.Sprite):
         self.attack_timer = 0        # 공격 타이머 (공격 간격 조절용)
         self.attack_interval = config.BOSS_ATTACK_INTERVAL  # 공격 간격 (config에서 가져옴)
         
+        # ===== 보스 이동 관련 변수 =====
+        self.move_timer = 0          # 이동 타이머 (이동 간격 조절용)
+        self.move_interval = random.randint(config.BOSS_MOVE_INTERVAL_MIN, config.BOSS_MOVE_INTERVAL_MAX)  # 랜덤 이동 간격
+        self.move_speed = config.BOSS_MOVE_SPEED  # 이동 속도 (config에서 가져옴)
+        self.is_moving = False       # 이동 중인지 여부
+        
         # 보스 스폰 시 콘솔에 정보 출력 (디버깅용)
-        print(f"👑 보스 고양이 스폰! 체력: {self.hp}, 스테이지: {stage}")
+        print(f"👑 보스 고양이 스폰! 체력: {self.hp}, 스테이지: {stage}, 이동 간격: {self.move_interval}ms")
     
     def update(self, keys=None):
         """
@@ -614,6 +886,9 @@ class BossCat(pygame.sprite.Sprite):
         - 보스의 공격 타이머를 관리합니다
         - 공격 간격에 도달하면 돌을 던집니다
         - 돌을 적절한 스프라이트 그룹에 추가합니다
+        - 보스의 이동 타이머를 관리합니다
+        - 랜덤한 간격으로 왼쪽으로 이동합니다
+        - 화면 왼쪽을 벗어나면 처음 위치에서 다시 나타납니다
         """
         # ===== 공격 타이머 관리 =====
         # 공격 타이머 증가 (약 60FPS 기준으로 16ms씩 증가)
@@ -640,10 +915,27 @@ class BossCat(pygame.sprite.Sprite):
             # 돌 던지기 로그 출력 (디버깅용)
             print(f"🪨 보스가 돌을 던졌습니다! 위치: ({stone_x}, {stone_y})")
         
-        # ===== 보스 동작 =====
-        # 보스는 제자리에 고정 (이동하지 않음)
-        # 필요시 여기에 보스 이동 로직 추가 가능
-        # 예: 플레이어를 향해 이동, 패턴별 움직임 등
+        # ===== 보스 이동 로직 =====
+        # 이동 타이머 증가 (약 60FPS 기준으로 16ms씩 증가)
+        self.move_timer += 16
+        
+        # 이동 간격에 도달하면 이동 시작
+        if self.move_timer >= self.move_interval:
+            self.move_timer = 0  # 타이머 리셋
+            self.is_moving = True  # 이동 상태로 변경
+            # 다음 이동 간격을 랜덤하게 설정
+            self.move_interval = random.randint(config.BOSS_MOVE_INTERVAL_MIN, config.BOSS_MOVE_INTERVAL_MAX)
+            print(f"👑 보스 이동 시작! 다음 이동 간격: {self.move_interval}ms")
+        
+        # 이동 중일 때 왼쪽으로 이동
+        if self.is_moving:
+            self.rect.x -= self.move_speed
+            
+            # 화면 왼쪽 밖으로 나가면 처음 위치에서 다시 나타남
+            if self.rect.right < 0:
+                self.rect.midbottom = (config.BOSS_START_X, config.BOSS_START_Y)  # 처음 위치로 복원
+                self.is_moving = False  # 이동 상태 해제
+                print(f"👑 보스가 화면 왼쪽을 벗어나 처음 위치({config.BOSS_START_X}, {config.BOSS_START_Y})에서 다시 나타남!")
 
 # ============================================================================
 # 🍪 간식 클래스 (Snack Class)
@@ -918,6 +1210,7 @@ class Stone(pygame.sprite.Sprite):
 # --- 그룹 ---
 all_sprites = pygame.sprite.Group()
 enemies = pygame.sprite.Group()
+mice = pygame.sprite.Group()  # 마우스 적 그룹
 shurikens = pygame.sprite.Group()
 items = pygame.sprite.Group()
 puppies = pygame.sprite.Group()  # 강아지 아이템 그룹
@@ -930,6 +1223,7 @@ game_over = False
 game_clear = False
 spawn_timer = 0
 snack_spawn_timer = 0
+mouse_spawn_timer = 0  # 마우스 스폰 타이머
 boss_spawned = False
 
 def get_touch_rect(sprite, margin):
@@ -945,6 +1239,8 @@ def draw_centered_text(text, y, color=config.WHITE, font_type=font):
     img = font_type.render(text, True, color)
     x = (config.WIDTH - img.get_width()) // 2
     screen.blit(img, (x, y))
+
+
 
 def load_highscores():
     """하이스코어 JSON 파일 로드 (없으면 빈 리스트 반환)"""
@@ -1044,11 +1340,11 @@ def draw_menu():
     pygame.draw.rect(screen, config.GROUND_COLOR, (0, config.HEIGHT-50, config.WIDTH, 50))
     
     # 게임 제목
-    draw_centered_text("개 닌자 대모험", 100, config.BLUE, font_title)
+    draw_centered_text("개 닌자 대모험", 30, config.BLUE, font_title)
     
     # 하이스코어 TOP 10 (가운데)
     highs = load_highscores()
-    y0 = 200
+    y0 = 100
     draw_centered_text("TOP 10 하이스코어", y0, config.YELLOW, font)
     y = y0 + 30
     if highs:
@@ -1070,7 +1366,9 @@ def draw_menu():
     y += 22
     draw_centered_text("↑ : 점프", y, config.WHITE, font_small)
     y += 22
-    draw_centered_text("스페이스바 : 수리검 발사", y, config.WHITE, font_small)
+    draw_centered_text("스페이스바 : 표창 발사", y, config.WHITE, font_small)
+    y += 22
+    draw_centered_text("🍪 간식 먹기 : 황금 표창 모드", y, config.YELLOW, font_small)
     y += 22
     draw_centered_text("R : 게임 재시작", y, config.WHITE, font_small)
     
@@ -1088,17 +1386,16 @@ def reset_game():
     stage_start_time = pygame.time.get_ticks()  # 스테이지 시작 시간 기록
     game_start_ticks = pygame.time.get_ticks()  # 게임 시작 시간 기록
     player.alive = True
-    player.rect.bottomleft = (50, config.HEIGHT - 50)
-    player.shuriken_double = False
-    player.double_end_time = 0
+    player.rect.bottomleft = (config.PLAYER_START_X, config.PLAYER_START_Y)
     player.defense_count = 0  # 방어 횟수 초기화
     player.defense_active = False  # 방어 효과 초기화
+    player.gold_shuriken_count = 0  # gold shuriken 갯수 초기화
     score = 0  # 점수 초기화
     stage_clear_start_time = 0  # 스테이지 클리어 시작 시간 초기화
     stage_clear_jump_index = -1  # 스테이지 클리어 점프 인덱스 초기화
     
     # 스프라이트 그룹 초기화
-    for group in [enemies, shurikens, items, puppies, stones]:
+    for group in [enemies, mice, shurikens, items, puppies, stones]:
         group.empty()
     all_sprites.empty()
     all_sprites.add(player)
@@ -1106,6 +1403,7 @@ def reset_game():
     # 게임 상태 변수 초기화
     spawn_timer = 0
     snack_spawn_timer = 0
+    mouse_spawn_timer = 0  # 마우스 스폰 타이머 초기화
     puppy_spawn_timer = 0  # puppy 전용 타이머 추가
     cats_spawned = 0  # 고양이 스폰 개수 초기화 (중요!)
     boss_spawned = False  # 보스 스폰 상태 초기화
@@ -1147,11 +1445,12 @@ while running:
             
             elif game_state == "playing":
                 if event.key == pygame.K_SPACE and player.alive:
-                    if player.shuriken_double:
-                        sh1 = Shuriken(player.rect.right, player.rect.centery - 10)
-                        sh2 = Shuriken(player.rect.right, player.rect.centery + 10)
-                        shurikens.add(sh1, sh2)
-                        all_sprites.add(sh1, sh2)
+                    # gold shuriken이 있으면 gold shuriken 발사, 없으면 일반 shuriken 발사
+                    if player.gold_shuriken_count > 0:
+                        if player.throw_gold_shuriken():
+                            gs = GoldShuriken(player.rect.right, player.rect.centery)
+                            shurikens.add(gs)
+                            all_sprites.add(gs)
                     else:
                         sh = Shuriken(player.rect.right, player.rect.centery)
                         shurikens.add(sh)
@@ -1208,6 +1507,18 @@ while running:
             if len(enemies) > 0:
                 print(f"🐱 현재 enemies 그룹 크기: {len(enemies)}")
 
+        # 마우스 적 스폰 로직 (고양이와 독립적으로 스폰)
+        if not boss_spawned:  # 보스가 스폰되기 전까지 계속 스폰
+            mouse_spawn_timer += dt
+            if mouse_spawn_timer > config.MOUSE_SPAWN_INTERVAL:
+                mouse_spawn_timer = 0
+                # config.py에서 설정된 마우스 시작 위치 사용 (player와 동일한 높이)
+                mouse = MouseEnemy(config.MOUSE_START_X, config.MOUSE_START_Y, current_stage)
+                mice.add(mouse)
+                all_sprites.add(mouse)
+                print(f"🐭 마우스 적 스폰됨 (위치: {mouse.rect.x}, {mouse.rect.y}, 속도: {mouse.speed})")
+                print(f"🐭 현재 mice 그룹 크기: {len(mice)}")
+
         # 간식 스폰 로직 (한 번만)
         if not hasattr(reset_game, 'snack_spawned') or not reset_game.snack_spawned:
             snack_spawn_timer += dt
@@ -1240,7 +1551,7 @@ while running:
 
         # 모든 고양이를 처치했을 때 보스 스폰
         if cats_spawned >= total_cats and not boss_spawned and len(enemies) == 0:
-            boss = BossCat(config.WIDTH - 150, config.HEIGHT - 50, current_stage)
+            boss = BossCat(config.BOSS_START_X, config.BOSS_START_Y, current_stage)
             enemies.add(boss)
             all_sprites.add(boss)
             boss_spawned = True
@@ -1251,8 +1562,14 @@ while running:
             else:
                 hit_cats = []
             for cat in hit_cats:
+                # Gold Shuriken인지 확인하여 데미지 결정
+                damage = 1
+                if isinstance(shuriken, GoldShuriken):
+                    damage = shuriken.damage_multiplier
+                    print(f"🥷 Gold Shuriken으로 {damage}배 데미지!")
+                
                 if isinstance(cat, BossCat):
-                    cat.hp -= 1
+                    cat.hp -= damage
                     if cat.hp <= 0:
                         cat.kill()
                         score += config.SCORE_BOSS
@@ -1266,22 +1583,28 @@ while running:
                             player.rect.bottom = config.HEIGHT - 50
                             player.vel_y = 0
                             player.on_ground = True
-                            # 스테이지 클리어 시 표창(수리검), 돌 즉시 제거
+                            # 스테이지 클리어 시 표창(수리검), 돌, 마우스 적 즉시 제거
                             for s in list(shurikens):
                                 s.kill()
                             for st in list(stones):
                                 st.kill()
+                            for m in list(mice):
+                                m.kill()
                         else:
                             # 모든 스테이지 클리어
                             game_state = "game_clear"
                     shuriken.kill()
                 else:
-                    cat.hp -= 1
+                    cat.hp -= damage
                     if cat.hp <= 0:
                         if hasattr(cat, "color_name"):
                             score += config.SCORE_PER_CAT.get(cat.color_name, 0)
                         cat.kill()
                     shuriken.kill()
+
+        # 마우스 적과 수리검 충돌 처리 (마우스는 표창보다 아래에 있어서 충돌하지 않음)
+        # 마우스는 표창에 맞지 않으므로 충돌 처리를 제거
+        # 표창이 마우스 위를 지나가도록 함
 
         # 충돌 체크 부분(playing 상태)
         # player_touch_rect = get_touch_rect(player, config.PLAYER_TOUCH_MARGIN)
@@ -1346,11 +1669,13 @@ while running:
                                 player.rect.bottom = config.HEIGHT - 50
                                 player.vel_y = 0
                                 player.on_ground = True
-                                # 스테이지 클리어 시 표창(수리검), 돌 즉시 제거
+                                # 스테이지 클리어 시 표창(수리검), 돌, 마우스 적 즉시 제거
                                 for s in list(shurikens):
                                     s.kill()
                                 for st in list(stones):
                                     st.kill()
+                                for m in list(mice):
+                                    m.kill()
                             else:
                                 game_state = "game_clear"
                         else:
@@ -1371,6 +1696,58 @@ while running:
                         game_state = "name_entry"
                     else:
                         game_state = "game_over"
+
+        # 마우스 적과의 충돌 시 방어 효과 적용
+        if len(mice) > 0:
+            mouse_touched = False
+            touched_mouse = None
+            # puppy가 있으면 정상 충돌 영역, 없으면 작은 충돌 영역 사용
+            if player.has_defense():
+                collision_rect = player.rect
+                print(f"🐕 puppy 있음 - 정상 충돌 영역 사용")
+            else:
+                # puppy가 없을 때는 더 작은 충돌 영역 사용
+                collision_rect = get_touch_rect(player, config.PUPPY_LESS_COLLISION_MARGIN)  # config에서 설정된 여백
+                print(f"❌ puppy 없음 - 작은 충돌 영역 사용 (여유: {config.PUPPY_LESS_COLLISION_MARGIN}픽셀)")
+            
+            # 디버깅: 충돌 영역 정보 출력
+            print(f"🔍 Player 충돌 영역: {collision_rect}")
+            
+            for mouse in mice:
+                print(f"🔍 Mouse {id(mouse)} 위치: {mouse.rect}, 충돌 영역: {mouse.collision_rect}")
+                # 충돌 감지 테스트: rect와 collision_rect 모두 시도
+                collision_detected = (collision_rect.colliderect(mouse.rect) or 
+                                    collision_rect.colliderect(mouse.collision_rect))
+                if collision_detected:
+                    print(f"💥 충돌 감지! Player와 Mouse {id(mouse)}")
+                    mouse_touched = True
+                    touched_mouse = mouse
+                    break
+            if mouse_touched:
+                print(f"💥 마우스 충돌 처리 시작! touched_mouse: {id(touched_mouse) if touched_mouse else 'None'}")
+                if player.has_defense():
+                    # puppy가 있으면 방어 효과 적용
+                    print(f"🐕 마우스 충돌 방어 효과 적용! 현재 방어 횟수: {player.defense_count}")
+                    # 충돌한 마우스 제거 + 점수 반영
+                    if touched_mouse:
+                        score += config.SCORE_PER_MOUSE
+                        touched_mouse.kill()
+                        print(f"🐕 방어 효과로 마우스 제거됨")
+                    # puppy 방어 효과 1회 소모
+                    player.remove_puppy_defense()
+                    # 방어 성공 - 게임 오버되지 않음
+                else:
+                    # puppy가 없으면 게임 오버
+                    print("❌ 마우스 충돌 방어 효과 없음 - 게임 오버")
+                    player.alive = False
+                    elapsed_seconds = (pygame.time.get_ticks() - game_start_ticks) / 1000.0
+                    if is_top10_score(score, elapsed_seconds, highscores_cache):
+                        entered_name = ""
+                        game_state = "name_entry"
+                    else:
+                        game_state = "game_over"
+            else:
+                print(f"🔍 마우스 충돌 없음. 현재 mice 수: {len(mice)}")
 
         # 돌 충돌도 동일하게
         stone_touched = False
@@ -1424,9 +1801,12 @@ while running:
         # UI 정보 표시
         # 현재 스테이지 표시
         draw_text(f"스테이지 {current_stage}", 10, 10, config.WHITE, font_large)
-        # 중앙 상단 점수/시간
+        # 중앙 상단 점수/시간/남은 표창
         elapsed_seconds = (pygame.time.get_ticks() - game_start_ticks) // 1000
-        info_text = f"점수: {score} | 시간: {int(elapsed_seconds)}초"
+        if player.gold_shuriken_count > 0:
+            info_text = f"점수: {score} | 시간: {int(elapsed_seconds)}초 | 🥷 {player.gold_shuriken_count}"
+        else:
+            info_text = f"점수: {score} | 시간: {int(elapsed_seconds)}초"
         info_img = font_small.render(info_text, True, config.WHITE)
         info_x = (config.WIDTH - info_img.get_width()) // 2
         screen.blit(info_img, (info_x, 10))
@@ -1436,9 +1816,7 @@ while running:
             stage_message = f"Stage {current_stage} 시작!"
             draw_centered_text(stage_message, 150, config.YELLOW, font_large)
         
-        if player.shuriken_double:
-            time_left = (player.double_end_time - pygame.time.get_ticks()) // 1000
-            # draw_text(f"간식 효과: {time_left}초", 10, 70, config.BLUE)
+
         
         # 방어 횟수 표시
         # if player.defense_count > 0:
